@@ -294,7 +294,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     gr.Markdown("""
     # 🎵 Spleeter & Demucs - Now Both Work!
     
-    **Follow me on:** [🤗 Hugging Face @ahk-d](https://huggingface.co/ahk-d) | [🐙 GitHub @ahk-d](https://github.com/ahk-d)
+    **Follow me on:** [ Hugging Face @ahk-d](https://huggingface.co/ahk-d) | [ GitHub @ahk-d](https://github.com/ahk-d)
     """)
 
     with gr.Row():
