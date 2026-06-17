@@ -158,7 +158,7 @@ def separate_with_htdemucs(audio_path):
 
         # Save stems with timestamp to ensure uniqueness
         timestamp = int(time.time() * 1000)  # millisecond timestamp
-        output_dir = f"htdemucs_stems_{timestamp}"
+        output_dir = os.path.join("outputs", f"htdemucs_stems_{timestamp}")
         os.makedirs(output_dir, exist_ok=True)
         
         stem_names = ["drums", "bass", "other", "vocals"]
@@ -194,7 +194,7 @@ def separate_with_spleeter(audio_path):
         
         # Create output directory with timestamp
         timestamp = int(time.time() * 1000)
-        output_dir = f"spleeter_stems_{timestamp}"
+        output_dir = os.path.join("outputs", f"spleeter_stems_{timestamp}")
         os.makedirs(output_dir, exist_ok=True)
         
         # Load audio using Spleeter's audio adapter (from stem_separation_spleeter.py)
@@ -386,5 +386,82 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     </p>
     """)
 
+import fastapi
+from fastapi import Request, UploadFile, File, Form
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+import shutil
+import uvicorn
+
+# Create outputs directory
+os.makedirs("outputs", exist_ok=True)
+
+app = fastapi.FastAPI(title="Stem Separation API")
+
+# Mount outputs folder to serve files statically
+app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
+
+@app.post("/api/separate")
+async def api_separate(
+    request: Request,
+    audio: UploadFile = File(...),
+    run_htdemucs: bool = Form(True),
+    run_spleeter: bool = Form(True)
+):
+    try:
+        # Save uploaded file temporarily
+        temp_audio_path = os.path.join("outputs", f"temp_upload_{int(time.time() * 1000)}_{audio.filename}")
+        with open(temp_audio_path, "wb") as buffer:
+            shutil.copyfileobj(audio.file, buffer)
+            
+        # Run separation
+        results = separate_selected_models(temp_audio_path, run_htdemucs, run_spleeter)
+        
+        # Build base URL for constructing full URLs to output files
+        base_url = str(request.base_url).rstrip("/")
+        
+        # Helper to convert local path to URL
+        def path_to_url(path):
+            if path is None:
+                return None
+            # Convert Windows backslashes to forward slashes for URLs
+            normalized_path = path.replace("\\", "/")
+            return f"{base_url}/{normalized_path}"
+
+        response_data = {
+            "status": "success",
+            "message": results[-1],
+            "stems": {
+                "htdemucs": {
+                    "drums": path_to_url(results[0]),
+                    "bass": path_to_url(results[1]),
+                    "other": path_to_url(results[2]),
+                    "vocals": path_to_url(results[3]),
+                } if run_htdemucs else None,
+                "spleeter": {
+                    "vocals": path_to_url(results[4]),
+                    "drums": path_to_url(results[5]),
+                    "bass": path_to_url(results[6]),
+                    "other": path_to_url(results[7]),
+                    "piano": path_to_url(results[8]),
+                } if run_spleeter else None
+            }
+        }
+        
+        # Clean up temp upload
+        try:
+            os.remove(temp_audio_path)
+        except Exception:
+            pass
+            
+        return JSONResponse(content=response_data)
+        
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+# Mount the Gradio UI onto the FastAPI app
+app = gr.mount_gradio_app(app, demo, path="/")
+
 if __name__ == "__main__":
-    demo.launch(share=True)
+    port = int(os.environ.get("GRADIO_SERVER_PORT", 7860))
+    uvicorn.run(app, host="0.0.0.0", port=port)
