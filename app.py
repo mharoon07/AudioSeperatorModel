@@ -502,13 +502,11 @@ app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
 async def api_separate(
     request: Request,
     audio: UploadFile = File(...),
-    run_htdemucs: bool = Form(True),
-    run_spleeter: bool = Form(True),
     vocals: bool = Form(True),
     drums: bool = Form(True),
     bass: bool = Form(True),
     piano: bool = Form(True),
-    other: bool = Form(True)
+    instruments: bool = Form(True)
 ):
     try:
         # Save uploaded file temporarily
@@ -516,15 +514,15 @@ async def api_separate(
         with open(temp_audio_path, "wb") as buffer:
             shutil.copyfileobj(audio.file, buffer)
             
-        # Run separation
+        # Run separation (Only Spleeter)
         results = separate_selected_models(
             temp_audio_path,
-            run_htdemucs,
-            run_spleeter,
+            run_htdemucs=False,
+            run_spleeter=True,
             vocals=vocals,
             drums=drums,
             bass=bass,
-            other=other,
+            other=instruments,
             piano=piano
         )
         # Check if an error occurred in separation
@@ -549,19 +547,11 @@ async def api_separate(
             return f"{base_url}/{normalized_path}"
 
         stems_dict = {
-            "htdemucs": {
-                "drums": path_to_url(results[0]),
-                "bass": path_to_url(results[1]),
-                "other": path_to_url(results[2]),
-                "vocals": path_to_url(results[3]),
-            } if run_htdemucs else None,
-            "spleeter": {
-                "vocals": path_to_url(results[4]),
-                "drums": path_to_url(results[5]),
-                "bass": path_to_url(results[6]),
-                "other": path_to_url(results[7]),
-                "piano": path_to_url(results[8]),
-            } if run_spleeter else None
+            "vocals": path_to_url(results[4]),
+            "drums": path_to_url(results[5]),
+            "bass": path_to_url(results[6]),
+            "instruments": path_to_url(results[7]),
+            "piano": path_to_url(results[8])
         }
 
         # Helper function to recursively remove None/null values
