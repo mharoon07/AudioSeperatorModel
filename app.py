@@ -7,6 +7,7 @@ from demucs.pretrained import get_model
 from demucs.apply import apply_model
 import os
 import tempfile
+import subprocess
 import numpy as np
 import warnings
 import soundfile as sf
@@ -239,19 +240,68 @@ def separate_with_spleeter(audio_path):
         traceback.print_exc()
         return None, None, None, None, None, f"❌ Spleeter Error: {str(e)}"
 
-# --- Combined separation function ---
-def separate_selected_models(audio_path, run_htdemucs, run_spleeter):
+# --- Video to Audio Extraction helper ---
+def extract_audio_from_video(video_path):
     """
-    Separates an audio file using selected models (HT-Demucs, Spleeter, or both).
+    Extracts the audio track from a video file using ffmpeg.
+    Returns the path to the extracted WAV audio file.
+    """
+    timestamp = int(time.time() * 1000)
+    extracted_audio_path = os.path.join("outputs", f"extracted_audio_{timestamp}.wav")
+    
+    # Run ffmpeg to extract audio
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", video_path,
+        "-vn",                 # Skip video track
+        "-acodec", "pcm_s16le", # Convert to PCM WAV
+        "-ar", "44100",        # Sample rate
+        "-ac", "2",            # 2 channels (stereo)
+        extracted_audio_path
+    ]
+    
+    print(f"Extracting audio track from video file: {video_path}")
+    print(f"Running command: {' '.join(cmd)}")
+    
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode != 0:
+        print(f"ffmpeg error: {result.stderr}")
+        raise Exception(f"Failed to extract audio from video using ffmpeg: {result.stderr}")
+        
+    print(f"Successfully extracted audio track: {extracted_audio_path}")
+    return extracted_audio_path
+
+# --- Combined separation function ---
+def separate_selected_models(audio_input_file, run_htdemucs, run_spleeter):
+    """
+    Separates an audio or video file using selected models (HT-Demucs, Spleeter, or both).
     Returns stems from selected models.
     """
-    if audio_path is None:
-        return [None] * 11, "Please upload an audio file."
+    if audio_input_file is None:
+        return [None] * 11, "Please upload an audio or video file."
+
+    # Handle if audio_input_file is a file object (from Gradio gr.File) or string path
+    if hasattr(audio_input_file, "name"):
+        audio_path = audio_input_file.name
+    else:
+        audio_path = audio_input_file
 
     if not run_htdemucs and not run_spleeter:
         return [None] * 11, "❌ Please select at least one model to run."
 
+    extracted_path = None
     try:
+        # Check if the file is a video
+        video_extensions = ('.mp4', '.mkv', '.mov', '.avi', '.webm', '.flv', '.3gp', '.ogg', '.ogv', '.m4v')
+        if audio_path.lower().endswith(video_extensions):
+            try:
+                extracted_path = extract_audio_from_video(audio_path)
+                process_path = extracted_path
+            except Exception as e:
+                return [None] * 11, f"❌ Video Audio Extraction Error: {str(e)}"
+        else:
+            process_path = audio_path
+
         htdemucs_results = [None] * 5  # 4 stems + 1 status
         spleeter_results = [None] * 6  # 5 stems + 1 status
         status_messages = []
@@ -259,13 +309,13 @@ def separate_selected_models(audio_path, run_htdemucs, run_spleeter):
         # Run HT-Demucs if selected
         if run_htdemucs:
             print("Running HT-Demucs...")
-            htdemucs_results = separate_with_htdemucs(audio_path)
+            htdemucs_results = separate_with_htdemucs(process_path)
             status_messages.append(htdemucs_results[-1])
         
         # Run Spleeter if selected
         if run_spleeter:
             print("Running Spleeter...")
-            spleeter_results = separate_with_spleeter(audio_path)
+            spleeter_results = separate_with_spleeter(process_path)
             status_messages.append(spleeter_results[-1])
         
         # Combine results: HT-Demucs (4 stems) + Spleeter (5 stems)
@@ -287,6 +337,14 @@ def separate_selected_models(audio_path, run_htdemucs, run_spleeter):
         import traceback
         traceback.print_exc()
         return [None] * 11, f"❌ Error: {str(e)}"
+    finally:
+        # Clean up temporary extracted WAV audio file if it was created
+        if extracted_path and os.path.exists(extracted_path):
+            try:
+                os.remove(extracted_path)
+                print(f"Cleaned up temporary extracted audio file: {extracted_path}")
+            except Exception as e:
+                print(f"Error cleaning up temporary file {extracted_path}: {e}")
 
 # --- Gradio UI ---
 print("Creating Gradio interface...")
@@ -299,7 +357,12 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
     with gr.Row():
         with gr.Column(scale=1):
-            audio_input = gr.Audio(type="filepath", label="🎵 Upload Your Song")
+            audio_input = gr.File(
+                label="🎵 Upload Audio or Video File",
+                file_count="single",
+                type="file",
+                file_types=["audio", "video"]
+            )
             
             # Model selection toggles
             gr.Markdown("### 🎛️ Select Models to Run")
