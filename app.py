@@ -132,7 +132,7 @@ def setup_spleeter_with_retry():
 setup_spleeter_with_retry()
 
 # --- HT-Demucs separation function ---
-def separate_with_htdemucs(audio_path):
+def separate_with_htdemucs(audio_path, drums=True, bass=True, other=True, vocals=True):
     """
     Separates an audio file using HT-Demucs into drums, bass, other, and vocals.
     Returns FILE PATHS.
@@ -163,13 +163,23 @@ def separate_with_htdemucs(audio_path):
         os.makedirs(output_dir, exist_ok=True)
         
         stem_names = ["drums", "bass", "other", "vocals"]
+        requested_stems = {
+            "drums": drums,
+            "bass": bass,
+            "other": other,
+            "vocals": vocals
+        }
 
         output_paths = []
         for i, name in enumerate(stem_names):
-            out_path = os.path.join(output_dir, f"{name}_{timestamp}.wav")
-            torchaudio.save(out_path, sources[i].cpu(), sr)
-            output_paths.append(out_path)
-            print(f"✅ HT-Demucs saved {name} to {out_path}")
+            if requested_stems.get(name, True):
+                out_path = os.path.join(output_dir, f"{name}_{timestamp}.wav")
+                torchaudio.save(out_path, sources[i].cpu(), sr)
+                output_paths.append(out_path)
+                print(f"✅ HT-Demucs saved {name} to {out_path}")
+            else:
+                output_paths.append(None)
+                print(f"ℹ️ HT-Demucs skipped saving {name} (not requested)")
 
         return output_paths[0], output_paths[1], output_paths[2], output_paths[3], "✅ HT-Demucs separation successful!"
 
@@ -178,7 +188,7 @@ def separate_with_htdemucs(audio_path):
         return None, None, None, None, f"❌ HT-Demucs Error: {str(e)}"
 
 # --- Spleeter separation function ---
-def separate_with_spleeter(audio_path):
+def separate_with_spleeter(audio_path, vocals=True, drums=True, bass=True, other=True, piano=True):
     """
     Separates an audio file using Spleeter into vocals, drums, bass, other, and piano.
     Uses Python API approach from stem_separation_spleeter.py
@@ -212,18 +222,29 @@ def separate_with_spleeter(audio_path):
         # Save stems with timestamp
         output_paths = []
         stem_names = ["vocals", "drums", "bass", "other", "piano"]
+        requested_stems = {
+            "vocals": vocals,
+            "drums": drums,
+            "bass": bass,
+            "other": other,
+            "piano": piano
+        }
         
         for stem_name in stem_names:
             if stem_name in prediction:
-                out_path = os.path.join(output_dir, f"{stem_name}_{timestamp}.wav")
-                stem_audio = prediction[stem_name]
-                
-                print(f"Spleeter: {stem_name} audio shape: {stem_audio.shape}, dtype: {stem_audio.dtype}")
-                
-                # Save using soundfile for better compatibility
-                sf.write(out_path, stem_audio, sample_rate)
-                output_paths.append(out_path)
-                print(f"✅ Spleeter saved {stem_name} to {out_path}")
+                if requested_stems.get(stem_name, True):
+                    out_path = os.path.join(output_dir, f"{stem_name}_{timestamp}.wav")
+                    stem_audio = prediction[stem_name]
+                    
+                    print(f"Spleeter: {stem_name} audio shape: {stem_audio.shape}, dtype: {stem_audio.dtype}")
+                    
+                    # Save using soundfile for better compatibility
+                    sf.write(out_path, stem_audio, sample_rate)
+                    output_paths.append(out_path)
+                    print(f"✅ Spleeter saved {stem_name} to {out_path}")
+                else:
+                    output_paths.append(None)
+                    print(f"ℹ️ Spleeter skipped saving {stem_name} (not requested)")
             else:
                 print(f"⚠️ Warning: {stem_name} not found in prediction")
                 output_paths.append(None)
@@ -272,13 +293,13 @@ def extract_audio_from_video(video_path):
     return extracted_audio_path
 
 # --- Combined separation function ---
-def separate_selected_models(audio_input_file, run_htdemucs, run_spleeter):
+def separate_selected_models(audio_input_file, run_htdemucs, run_spleeter, vocals=True, drums=True, bass=True, other=True, piano=True):
     """
     Separates an audio or video file using selected models (HT-Demucs, Spleeter, or both).
     Returns stems from selected models.
     """
     if audio_input_file is None:
-        return [None] * 11, "Please upload an audio or video file."
+        return [None] * 9 + ["Please upload an audio or video file."]
 
     # Handle if audio_input_file is a file object (from Gradio gr.File) or string path
     if hasattr(audio_input_file, "name"):
@@ -287,7 +308,7 @@ def separate_selected_models(audio_input_file, run_htdemucs, run_spleeter):
         audio_path = audio_input_file
 
     if not run_htdemucs and not run_spleeter:
-        return [None] * 11, "❌ Please select at least one model to run."
+        return [None] * 9 + ["❌ Please select at least one model to run."]
 
     extracted_path = None
     try:
@@ -298,7 +319,7 @@ def separate_selected_models(audio_input_file, run_htdemucs, run_spleeter):
                 extracted_path = extract_audio_from_video(audio_path)
                 process_path = extracted_path
             except Exception as e:
-                return [None] * 11, f"❌ Video Audio Extraction Error: {str(e)}"
+                return [None] * 9 + [f"❌ Video Audio Extraction Error: {str(e)}"]
         else:
             process_path = audio_path
 
@@ -309,13 +330,26 @@ def separate_selected_models(audio_input_file, run_htdemucs, run_spleeter):
         # Run HT-Demucs if selected
         if run_htdemucs:
             print("Running HT-Demucs...")
-            htdemucs_results = separate_with_htdemucs(process_path)
+            htdemucs_results = separate_with_htdemucs(
+                process_path,
+                drums=drums,
+                bass=bass,
+                other=other,
+                vocals=vocals
+            )
             status_messages.append(htdemucs_results[-1])
         
         # Run Spleeter if selected
         if run_spleeter:
             print("Running Spleeter...")
-            spleeter_results = separate_with_spleeter(process_path)
+            spleeter_results = separate_with_spleeter(
+                process_path,
+                vocals=vocals,
+                drums=drums,
+                bass=bass,
+                other=other,
+                piano=piano
+            )
             status_messages.append(spleeter_results[-1])
         
         # Combine results: HT-Demucs (4 stems) + Spleeter (5 stems)
@@ -336,7 +370,7 @@ def separate_selected_models(audio_input_file, run_htdemucs, run_spleeter):
         print(f"Combined Error: {e}")
         import traceback
         traceback.print_exc()
-        return [None] * 11, f"❌ Error: {str(e)}"
+        return [None] * 9 + [f"❌ Error: {str(e)}"]
     finally:
         # Clean up temporary extracted WAV audio file if it was created
         if extracted_path and os.path.exists(extracted_path):
@@ -469,7 +503,12 @@ async def api_separate(
     request: Request,
     audio: UploadFile = File(...),
     run_htdemucs: bool = Form(True),
-    run_spleeter: bool = Form(True)
+    run_spleeter: bool = Form(True),
+    vocals: bool = Form(True),
+    drums: bool = Form(True),
+    bass: bool = Form(True),
+    piano: bool = Form(True),
+    other: bool = Form(True)
 ):
     try:
         # Save uploaded file temporarily
@@ -478,8 +517,26 @@ async def api_separate(
             shutil.copyfileobj(audio.file, buffer)
             
         # Run separation
-        results = separate_selected_models(temp_audio_path, run_htdemucs, run_spleeter)
-        
+        results = separate_selected_models(
+            temp_audio_path,
+            run_htdemucs,
+            run_spleeter,
+            vocals=vocals,
+            drums=drums,
+            bass=bass,
+            other=other,
+            piano=piano
+        )
+        # Check if an error occurred in separation
+        status_message = results[-1]
+        if status_message.startswith("❌") or "error" in status_message.lower() or "please upload" in status_message.lower():
+            # Clean up temp upload
+            try:
+                os.remove(temp_audio_path)
+            except Exception:
+                pass
+            return JSONResponse(status_code=400, content={"status": "error", "message": status_message})
+
         # Build base URL for constructing full URLs to output files
         base_url = str(request.base_url).rstrip("/")
         
@@ -491,24 +548,35 @@ async def api_separate(
             normalized_path = path.replace("\\", "/")
             return f"{base_url}/{normalized_path}"
 
+        stems_dict = {
+            "htdemucs": {
+                "drums": path_to_url(results[0]),
+                "bass": path_to_url(results[1]),
+                "other": path_to_url(results[2]),
+                "vocals": path_to_url(results[3]),
+            } if run_htdemucs else None,
+            "spleeter": {
+                "vocals": path_to_url(results[4]),
+                "drums": path_to_url(results[5]),
+                "bass": path_to_url(results[6]),
+                "other": path_to_url(results[7]),
+                "piano": path_to_url(results[8]),
+            } if run_spleeter else None
+        }
+
+        # Helper function to recursively remove None/null values
+        def clean_nones(val):
+            if isinstance(val, dict):
+                cleaned = {k: clean_nones(v) for k, v in val.items() if v is not None}
+                return cleaned if cleaned else None
+            return val
+
+        cleaned_stems = clean_nones(stems_dict)
+
         response_data = {
             "status": "success",
-            "message": results[-1],
-            "stems": {
-                "htdemucs": {
-                    "drums": path_to_url(results[0]),
-                    "bass": path_to_url(results[1]),
-                    "other": path_to_url(results[2]),
-                    "vocals": path_to_url(results[3]),
-                } if run_htdemucs else None,
-                "spleeter": {
-                    "vocals": path_to_url(results[4]),
-                    "drums": path_to_url(results[5]),
-                    "bass": path_to_url(results[6]),
-                    "other": path_to_url(results[7]),
-                    "piano": path_to_url(results[8]),
-                } if run_spleeter else None
-            }
+            "message": status_message,
+            "stems": cleaned_stems if cleaned_stems is not None else {}
         }
         
         # Clean up temp upload
