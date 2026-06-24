@@ -3,9 +3,7 @@ title: HT-Demucs Spleeter Music Stem Separation - AI Audio Source Separation 202
 emoji: 🎵
 colorFrom: blue
 colorTo: purple
-sdk: gradio
-sdk_version: "5.39.0"
-python_version: "3.10"
+sdk: docker
 app_file: app.py
 pinned: false
 ---
